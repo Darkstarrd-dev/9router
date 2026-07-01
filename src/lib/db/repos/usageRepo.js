@@ -56,6 +56,7 @@ function addToCounter(target, key, values) {
   target[key].promptTokens += values.promptTokens || 0;
   target[key].completionTokens += values.completionTokens || 0;
   target[key].cost += values.cost || 0;
+  if (values.keyName) target[key].keyName = values.keyName;
   if (values.meta) Object.assign(target[key], values.meta);
 }
 
@@ -87,7 +88,8 @@ function aggregateEntryToDay(day, entry) {
 
   const apiKeyVal = entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : "local-no-key";
   const akModelKey = `${apiKeyVal}|${entry.model}|${entry.provider || "unknown"}`;
-  addToCounter(day.byApiKey, akModelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider, apiKey: entry.apiKey || null } });
+  const keyName = apiKeyVal === "local-no-key" ? "Local (No API Key)" : apiKeyVal.slice(0, 8) + "...";
+  addToCounter(day.byApiKey, akModelKey, { ...vals, keyName, meta: { rawModel: entry.model, provider: entry.provider, apiKey: entry.apiKey || null } });
 
   const endpoint = entry.endpoint || "Unknown";
   const epKey = `${endpoint}|${entry.model}|${entry.provider || "unknown"}`;
@@ -472,6 +474,19 @@ export async function getUsageStats(period = "all") {
     for (const dr of dayRows) {
       const dateKey = dr.dateKey;
       const day = parseJson(dr.data, {});
+      let dayUpdated = false;
+
+      for (const [akKey, ak] of Object.entries(day.byApiKey || {})) {
+        if (!ak.keyName) {
+          const apiKeyVal = ak.apiKey && typeof ak.apiKey === "string" ? ak.apiKey : "local-no-key";
+          day.byApiKey[akKey].keyName = apiKeyVal === "local-no-key" ? "Local (No API Key)" : apiKeyVal.slice(0, 8) + "...";
+          dayUpdated = true;
+        }
+      }
+
+      if (dayUpdated) {
+        db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
+      }
       stats.totalPromptTokens += day.promptTokens || 0;
       stats.totalCompletionTokens += day.completionTokens || 0;
       stats.totalCost += day.cost || 0;
