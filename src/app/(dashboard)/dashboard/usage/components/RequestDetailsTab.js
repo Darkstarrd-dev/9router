@@ -243,6 +243,7 @@ export default function RequestDetailsTab() {
               <tr className="border-b border-black/5 dark:border-white/5">
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Account / Key</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
@@ -253,7 +254,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="8" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -262,7 +263,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="8" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -275,9 +276,19 @@ export default function RequestDetailsTab() {
                     <td className="whitespace-nowrap p-4 text-sm text-text-main">
                       {new Date(detail.timestamp).toLocaleString()}
                     </td>
-                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
-                      {detail.model}
-                    </td>
+      <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
+        {detail.model}
+        {detail.connectionName && (
+          <span className="text-text-muted ml-1.5">({detail.connectionName})</span>
+        )}
+      </td>
+      <td className="max-w-[160px] truncate p-4 text-sm text-text-main">
+        {detail.connectionName ? (
+          <span className="font-medium text-primary">{detail.connectionName}</span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        )}
+      </td>
                     <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
                        <span className="font-medium">
                          {getProviderName(detail.provider, providerNameCache)}
@@ -344,6 +355,10 @@ export default function RequestDetailsTab() {
               <div>
                  <span className="text-text-muted">Provider:</span>{" "}
                  <span className="text-text-main font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
+               </div>
+               <div>
+                 <span className="text-text-muted">Account / Key:</span>{" "}
+                 <span className="text-text-main font-medium">{selectedDetail.connectionName || "—"}</span>
                </div>
               <div>
                 <span className="text-text-muted">Model:</span>{" "}
