@@ -90,6 +90,7 @@ async function flushToDatabase() {
             provider: item.provider || null,
             model: item.model || null,
             connectionId: item.connectionId || null,
+            connectionName: item.connectionName || null,
             timestamp: item.timestamp,
             status: item.status || null,
             latency: item.latency || {},
@@ -168,6 +169,21 @@ export async function getRequestDetails(filter = {}) {
   );
   const details = rows.map((r) => parseJson(r.data, {}));
 
+  // Backfill connectionName from connectionId for records saved before the field was added
+  if (details.length > 0) {
+    try {
+      const { getProviderConnections } = await import("./connectionsRepo.js");
+      const connections = await getProviderConnections();
+      const connMap = {};
+      for (const c of connections) connMap[c.id] = c.name || c.email || c.id;
+      for (const d of details) {
+        if (!d.connectionName && d.connectionId) {
+          d.connectionName = connMap[d.connectionId] || null;
+        }
+      }
+    } catch {}
+  }
+
   return {
     details,
     pagination: { page, pageSize, totalItems, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
@@ -177,7 +193,16 @@ export async function getRequestDetails(filter = {}) {
 export async function getRequestDetailById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
-  return row ? parseJson(row.data, null) : null;
+  const detail = row ? parseJson(row.data, null) : null;
+  if (detail && !detail.connectionName && detail.connectionId) {
+    try {
+      const { getProviderConnections } = await import("./connectionsRepo.js");
+      const connections = await getProviderConnections();
+      const conn = connections.find((c) => c.id === detail.connectionId);
+      if (conn) detail.connectionName = conn.name || conn.email || conn.id;
+    } catch {}
+  }
+  return detail;
 }
 
 const _shutdownHandler = async () => {
