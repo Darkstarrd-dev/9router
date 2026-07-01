@@ -62,6 +62,8 @@ export default function ProviderDetailPage() {
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
+  const [dailyQuota429Enabled, setDailyQuota429Enabled] = useState(false);
+  const [dailyQuota429Patterns, setDailyQuota429Patterns] = useState({});
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
@@ -275,6 +277,10 @@ export default function ProviderDetailPage() {
       const override = (settingsData.providerStrategies || {})[providerId] || {};
       setProviderStrategy(override.fallbackStrategy || null);
       setProviderStickyLimit(override.stickyRoundRobinLimit != null ? String(override.stickyRoundRobinLimit) : "1");
+      // Load per-provider 429 daily-quota config
+      const quota429 = (settingsData.provider429DailyQuota || {})[providerId] || {};
+      setDailyQuota429Enabled(quota429.enabled === true);
+      setDailyQuota429Patterns(quota429.patterns || {});
       // Load per-provider thinking config
       const thinkingCfg = (settingsData.providerThinking || {})[providerId] || {};
       setThinkingMode(thinkingCfg.mode || "auto");
@@ -365,6 +371,44 @@ export default function ProviderDetailPage() {
   const handleStickyLimitChange = (value) => {
     setProviderStickyLimit(value);
     saveProviderStrategy("round-robin", value);
+  };
+
+  const saveDailyQuota429 = async (enabled, patterns) => {
+    try {
+      const settingsRes = await fetch("/api/settings", { cache: "no-store" });
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const current = settingsData.provider429DailyQuota || {};
+      const updated = { ...current };
+      const hasPatterns = patterns && Object.keys(patterns).length > 0;
+      if (!enabled && !hasPatterns) {
+        delete updated[providerId];
+      } else {
+        updated[providerId] = { enabled, patterns: patterns || {} };
+      }
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider429DailyQuota: updated }),
+      });
+    } catch (error) {
+      console.log("Error saving 429 daily quota config:", error);
+    }
+  };
+
+  const handleDailyQuota429Toggle = (enabled) => {
+    setDailyQuota429Enabled(enabled);
+    saveDailyQuota429(enabled, dailyQuota429Patterns);
+  };
+
+  const handleDailyQuota429PatternChange = (modelId, pattern) => {
+    const updated = { ...dailyQuota429Patterns };
+    if (pattern.trim()) {
+      updated[modelId] = pattern;
+    } else {
+      delete updated[modelId];
+    }
+    setDailyQuota429Patterns(updated);
+    saveDailyQuota429(dailyQuota429Enabled, updated);
   };
 
   const saveThinkingConfig = async (mode) => {
@@ -1020,6 +1064,9 @@ export default function ProviderDetailPage() {
           onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
+          dailyQuota429Enabled={dailyQuota429Enabled}
+          dailyQuota429Patterns={dailyQuota429Patterns}
+          on429PatternChange={handleDailyQuota429PatternChange}
         />
       );
     }
@@ -1339,6 +1386,19 @@ export default function ProviderDetailPage() {
                 Delete
               </Button>
             </div>
+          </div>
+          {/* 429 Daily-Quota Detection toggle */}
+          <div className="flex items-start sm:items-center justify-between gap-3 border-t border-black/[0.05] dark:border-white/[0.05] pt-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">429 Daily Quota Detection</p>
+              <p className="text-xs text-text-muted">
+                Lock key+model until next CST day on matching 429; wait &amp; retry same key for others.
+              </p>
+            </div>
+            <Toggle
+              checked={dailyQuota429Enabled}
+              onChange={handleDailyQuota429Toggle}
+            />
           </div>
         </Card>
       )}

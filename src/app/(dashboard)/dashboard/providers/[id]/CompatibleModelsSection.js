@@ -4,7 +4,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, dailyQuota429Enabled, dailyQuota429Pattern, on429PatternChange }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -60,6 +60,19 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
           )}
         </div>
       </div>
+      {dailyQuota429Enabled && (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] text-text-muted whitespace-nowrap">429特征词</span>
+          <input
+            type="text"
+            value={dailyQuota429Pattern || ""}
+            onChange={(e) => on429PatternChange?.(modelId, e.target.value)}
+            placeholder="匹配模型名"
+            title="匹配此词的429锁定到次日CST；留空则匹配模型名"
+            className="w-32 px-2 py-1 text-xs border border-border rounded-md bg-background focus:outline-none focus:border-primary"
+          />
+        </div>
+      )}
       <button
         onClick={onDeleteAlias}
         className="p-1 hover:bg-red-50 rounded text-red-500"
@@ -71,7 +84,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, dailyQuota429Enabled, dailyQuota429Patterns, on429PatternChange }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -206,6 +219,9 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
               onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
               testStatus={modelTestResults[id]}
               isTesting={testingModelId === id}
+              dailyQuota429Enabled={dailyQuota429Enabled}
+              dailyQuota429Pattern={dailyQuota429Patterns?.[id]}
+              on429PatternChange={on429PatternChange}
             />
           ))}
         </div>
@@ -229,4 +245,7 @@ CompatibleModelsSection.propTypes = {
     isActive: PropTypes.bool,
   })).isRequired,
   isAnthropic: PropTypes.bool,
+  dailyQuota429Enabled: PropTypes.bool,
+  dailyQuota429Patterns: PropTypes.object,
+  on429PatternChange: PropTypes.func,
 };

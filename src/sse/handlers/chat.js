@@ -20,6 +20,8 @@ import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
+import { getNextCSTDayStartMs, checkDailyQuotaMatch } from "open-sse/services/accountFallback.js";
+import { MAX_DAILY_QUOTA_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 
 /**
  * Handle chat completion request
@@ -204,6 +206,15 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastError = null;
   let lastStatus = null;
 
+  // Load settings once for the retry loop (chat config + 429 daily-quota config)
+  const retrySettings = await getSettings();
+  const dailyQuotaConfig = (retrySettings.provider429DailyQuota || {})[provider];
+  const dailyQuotaEnabled = dailyQuotaConfig?.enabled === true;
+  const dailyQuotaPatterns = dailyQuotaConfig?.patterns || {};
+  const MAX_TEMP_429_RETRIES = 5;
+  const TEMP_429_WAIT_MS = 5000;
+  let temp429RetryCount = 0;
+
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
@@ -239,7 +250,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     }
 
     // Use shared chatCore
-    const chatSettings = await getSettings();
+    const chatSettings = retrySettings;
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
     const result = await handleChatCore({
       body: { ...body, model: `${provider}/${model}` },
@@ -276,7 +287,48 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     if (result.success) return result.response;
 
-    // Mark account unavailable (auto-calculates cooldown with exponential backoff, or precise resetsAtMs)
+    // ── 429 Daily-Quota mechanism (per-provider toggle) ──────────
+    // When enabled, 429s matching a model-specific pattern are treated as
+    // daily-quota errors: lock key+model until next CST day, switch key.
+    // Non-matching 429s are temporary: wait 5s and retry same key (max 5),
+    // then switch key without locking.
+    if (result.status === 429 && dailyQuotaEnabled) {
+      const isDailyQuota = checkDailyQuotaMatch(result.error, model, dailyQuotaPatterns);
+
+      if (isDailyQuota) {
+        // Daily quota 429: lock key+model until next CST day, switch to other key
+        log.warn("CHAT", `Daily quota 429 for ${provider}/${model} on ${credentials.connectionName}, locking until next CST day`);
+        await markAccountUnavailable(
+          credentials.connectionId, 429, result.error,
+          provider, model, getNextCSTDayStartMs(), MAX_DAILY_QUOTA_COOLDOWN_MS
+        );
+        excludeConnectionIds.add(credentials.connectionId);
+        temp429RetryCount = 0;
+        lastError = result.error;
+        lastStatus = result.status;
+        continue;
+      }
+
+      // Temporary 429: wait and retry same key (no lock, no exclude)
+      if (temp429RetryCount < MAX_TEMP_429_RETRIES) {
+        temp429RetryCount++;
+        log.info("CHAT", `Temporary 429 for ${provider}/${model} on ${credentials.connectionName}, retry ${temp429RetryCount}/${MAX_TEMP_429_RETRIES} in ${TEMP_429_WAIT_MS}ms`);
+        await new Promise(r => setTimeout(r, TEMP_429_WAIT_MS));
+        lastError = result.error;
+        lastStatus = result.status;
+        continue;
+      }
+
+      // Exhausted temp retries: switch key without locking
+      log.warn("CHAT", `Temporary 429 retries exhausted for ${credentials.connectionName}, switching key`);
+      excludeConnectionIds.add(credentials.connectionId);
+      temp429RetryCount = 0;
+      lastError = result.error;
+      lastStatus = result.status;
+      continue;
+    }
+
+    // ── Default fallback (non-429, mechanism disabled, or non-matching) ──
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, result.resetsAtMs);
 
     if (shouldFallback) {

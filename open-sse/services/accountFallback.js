@@ -13,6 +13,35 @@ export function getQuotaCooldown(backoffLevel = 0) {
 }
 
 /**
+ * Get the timestamp of next CST (UTC+8) midnight + 5min buffer.
+ * Used for daily-quota 429 locks: key+model locked until next CST day 00:05.
+ * @returns {number} Epoch milliseconds
+ */
+export function getNextCSTDayStartMs() {
+  const CST_OFFSET_MS = 8 * 60 * 60 * 1000;
+  const cstNow = new Date(Date.now() + CST_OFFSET_MS);
+  cstNow.setUTCDate(cstNow.getUTCDate() + 1);
+  cstNow.setUTCHours(0, 5, 0, 0);
+  return cstNow.getTime() - CST_OFFSET_MS;
+}
+
+/**
+ * Check whether a 429 error is a "daily quota" type for a given model.
+ * Daily-quota 429s lock key+model until next CST day; temporary 429s wait & retry same key.
+ * @param {string|object} errorText - Upstream error message body
+ * @param {string} model - Model ID without provider prefix (e.g. "deepseek-ai/DeepSeek-V4-Pro")
+ * @param {Object.<string, string>} [patterns] - Per-model feature word map; empty/missing = match model name
+ * @returns {boolean} True if the error is a daily-quota 429
+ */
+export function checkDailyQuotaMatch(errorText, model, patterns) {
+  if (!errorText || !model) return false;
+  const lowerError = (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase();
+  const pattern = (patterns?.[model] ?? "").trim();
+  const matchPattern = (pattern || model).toLowerCase();
+  return lowerError.includes(matchPattern);
+}
+
+/**
  * Check if error should trigger account fallback (switch to next account)
  * Config-driven: matches ERROR_RULES top-to-bottom (text rules first, then status)
  * @param {number} status - HTTP status code
